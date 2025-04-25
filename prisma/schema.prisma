@@ -8,7 +8,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
 model audio_submission {
   id           String    @id @db.VarChar(36)
   task_id      String    @db.VarChar(36)

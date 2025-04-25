@@ -1,4 +1,4 @@
-import { checkS3ObjectExists, listS3Objects, uploadToS3 } from "@/s3/storage";
+import { listS3Objects, uploadToS3 } from "@/s3/storage";
 import { S3Client } from "@aws-sdk/client-s3";
 import { Prisma, PrismaClient } from "./generated/prisma";
 
@@ -77,7 +77,6 @@ interface ImageInfo {
 
 async function isStagingImage(path: string): Promise<ImageInfo> {
 	const stagingUrl = stagingS3Config.endpoint.replace("https://", "");
-
 	const stagingPrefix = `https://${stagingS3Config.bucketName}.${stagingUrl}`;
 
 	if (path.includes(stagingPrefix)) {
@@ -91,23 +90,33 @@ async function isStagingImage(path: string): Promise<ImageInfo> {
 	}
 
 	try {
-		const exists = await checkS3ObjectExists({
-			s3Client: stagingClient,
-			bucketName: stagingS3Config.bucketName,
-			key: path,
-		});
+		// If we have credentials
+		// const exists = await checkS3ObjectExists({
+		// 	s3Client: stagingClient,
+		// 	bucketName: stagingS3Config.bucketName,
+		// 	key: path,
+		// });
+
+		// Check if the URL exists by making a HEAD request
+		const fullUrl = `${stagingPrefix}${path}`;
+		const response = await fetch(fullUrl, { method: "HEAD" });
 
 		return {
-			isStaging: exists,
+			isStaging: response.ok,
 			key: path,
 			withUrl: false,
 		};
 	} catch (error) {
-		console.error("Error! So it should be live");
+		console.error("Error checking URL existence:", error);
+
+		const liveEndpoint = liveS3Config.endpoint.replace("https://", "");
+
+		const withUrl = path.includes("https://");
+		const key = withUrl ? path.split(liveEndpoint)[1] : path;
 		return {
 			isStaging: false,
-			key: null,
-			withUrl: false,
+			key,
+			withUrl,
 		};
 	}
 }
@@ -158,10 +167,12 @@ async function main() {
 					// });
 
 					//@ts-ignore let's ignore this for now
+					// const prefixUrl = liveS3Config.endpoint.replace("https://", "");
+					// const livePrefix= `https://${liveS3Config.bucketName}.${prefixUrl}`;
 					// await livePrisma[table.trim()].update({
 					//     where: { id: image.id },
 					//     data: {
-					//         image_path: withUrl ? `${liveS3Config.endpoint}${key}`: key,
+					//         image_path: withUrl ? `${livePrefix}${key}`: key,
 					//     },
 					// });
 				}
@@ -175,10 +186,9 @@ async function main() {
 
 			//Do the stagingData
 			// for (const data of stagingData) {
-			// 	if (!data.image_path) continue;
+			// 	if (!data[columnName]) continue;
 			// 	const { isStaging, key, withUrl } = await isStagingImage(
-			// 		data.image_path,
-			// 		stagingS3Config,
+			// data[columnName],
 			// 	);
 
 			// 	if (!isStaging && key) {
@@ -186,10 +196,10 @@ async function main() {
 			// 			s3Client: stagingClient,
 			// 			bucketName: stagingS3Config.bucketName,
 			// 			key,
-			// 			s3Url: data.image_path,
+			// 			s3Url: data[columnName],
 			// 		});
 			// 		console.log(
-			// 			`Uploaded ${data.image_path} to s3://${stagingS3Config.bucketName}/${key}`,
+			// 			`Uploaded ${data[columnName]} to s3://${stagingS3Config.bucketName}/${key}`,
 			// 		);
 
 			// await deleteFromS3({
@@ -199,19 +209,17 @@ async function main() {
 			// });
 
 			//@ts-ignore let's ignore this for now
+			// const prefixUrl = stagingS3Config.endpoint.replace("https://", "");
+			// const stagingPrefix= `https://${stagingS3Config.bucketName}.${prefixUrl}`;
 			// await stagingPrisma[table.trim()].update({
 			//     where: { id: image.id },
 			//     data: {
-			//         image_path: withUrl ? `${liveS3Config.endpoint}${key}`: key,
+			//         image_path: withUrl ? `${stagingPrefix}${key}`: key,
 			//     },
 			// });
 			// 	}
 			// }
 		}
-
-		// const kiImages = await livePrisma.bilder_ki_images.findMany({});
-		// const audio = await livePrisma.audio_submission.findMany({});
-		// console.log(kiImages, audio);
 	} catch (error) {
 		console.error("Operation failed:", error);
 		process.exit(1);

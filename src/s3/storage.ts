@@ -1,13 +1,10 @@
 import {
 	DeleteObjectCommand,
-	GetObjectCommand,
 	HeadObjectCommand,
 	ListObjectsV2Command,
 	PutObjectCommand,
 	type S3Client,
 } from "@aws-sdk/client-s3";
-import { createWriteStream, writeFileSync } from "node:fs";
-import { Readable } from "node:stream";
 
 interface S3Params {
 	s3Client: S3Client;
@@ -74,59 +71,6 @@ export async function deleteFromS3({
 		console.log(`Successfully deleted s3://${bucketName}/${key}`);
 	} catch (error) {
 		console.error("Error deleting from S3:", error);
-		throw error;
-	}
-}
-
-interface DownloadFromS3Params extends S3Params {
-	key: string;
-	outputPath: string;
-}
-
-export async function downloadFromS3({
-	s3Client,
-	bucketName,
-	key,
-	outputPath,
-}: DownloadFromS3Params): Promise<void> {
-	try {
-		console.log(`Downloading s3://${bucketName}/${key} to ${outputPath}`);
-
-		const command = new GetObjectCommand({
-			Bucket: bucketName,
-			Key: key,
-		});
-
-		const response = await s3Client.send(command);
-
-		if (response.Body instanceof Readable) {
-			const writeStream = createWriteStream(outputPath);
-			response.Body.pipe(writeStream);
-
-			return new Promise((resolve, reject) => {
-				writeStream.on("finish", () => {
-					console.log(
-						`Successfully downloaded s3://${bucketName}/${key} to ${outputPath}`,
-					);
-					resolve();
-				});
-				writeStream.on("error", (err) => {
-					console.error("Error writing file:", err);
-					reject(err);
-				});
-			});
-		}
-		const body = await response.Body?.transformToByteArray();
-		if (body) {
-			writeFileSync(outputPath, Buffer.from(body));
-			console.log(
-				`Successfully downloaded s3://${bucketName}/${key} to ${outputPath}`,
-			);
-		} else {
-			throw new Error("Empty response body");
-		}
-	} catch (error) {
-		console.error("Error downloading file from S3:", error);
 		throw error;
 	}
 }
