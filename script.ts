@@ -53,8 +53,8 @@ const stagingS3Config: S3Config = {
 
 const tablesToTransfer = [
 	"audio_submission.path",
-	"bilder_ki_images.image_path",
-	"edubot_task_files.path",
+	// "bilder_ki_images.image_path",
+	// "edubot_task_files.path",
 ] as const;
 
 const liveClient = new S3Client({
@@ -76,10 +76,13 @@ interface ImageInfo {
 }
 
 async function isStagingImage(path: string): Promise<ImageInfo> {
-	const stagingUrl = stagingS3Config.endpoint.split("https://")[1];
-	const stagingPrefix = `${stagingUrl.at(0) + stagingS3Config.bucketName}.${stagingUrl.at(1)}`;
+	const stagingUrl = stagingS3Config.endpoint.replace("https://", "");
+
+	const stagingPrefix = `https://${stagingS3Config.bucketName}.${stagingUrl}`;
+
 	if (path.includes(stagingPrefix)) {
-		const key = path.split(stagingS3Config.endpoint)[1];
+		console.log("Staging URL detected");
+		const key = path.split(stagingPrefix)[1];
 		return {
 			isStaging: true,
 			key,
@@ -130,7 +133,6 @@ async function main() {
 
 			const liveData = await livePrisma.$queryRaw<RawQueryResult>(query);
 
-			//@ts-ignore let's ignore this for now
 			const stagingData = await stagingPrisma.$queryRaw<RawQueryResult>(query);
 
 			//Do the liveData first
