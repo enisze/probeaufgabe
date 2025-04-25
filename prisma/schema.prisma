@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model audio_submission {
+  id           String    @id @db.VarChar(36)
+  task_id      String    @db.VarChar(36)
+  temp_user_id String    @db.VarChar(36)
+  path         String    @db.VarChar(256)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model bilder_ki_images {
+  id             String   @id @db.VarChar(36)
+  user_id        String   @db.VarChar(36)
+  group_id       String   @db.VarChar(36)
+  prompt         String
+  revised_prompt String?
+  image_path     String?  @db.VarChar(256)
+  image_size     String   @db.VarChar(64)
+  model          String   @db.VarChar(128)
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+}
