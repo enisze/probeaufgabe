@@ -5,7 +5,7 @@ import { Prisma, PrismaClient } from "./generated/live/prisma";
 const livePrisma = new PrismaClient({
 	datasources: {
 		db: {
-			url: process.env.stagingDbConnectionString,
+			url: process.env.liveDbConnectionString,
 		},
 	},
 });
@@ -141,8 +141,8 @@ async function main() {
 				if (!data[columnName]) continue;
 				const { isStaging, key, withUrl } = await isStagingImage({
 					path: data[columnName],
-					s3Config: liveS3Config,
-					s3Client: liveClient,
+					s3Config: stagingS3Config,
+					s3Client: stagingClient,
 				});
 
 				if (isStaging && key) {
@@ -167,12 +167,14 @@ async function main() {
 					//Update database to use the updated URL if needed
 					if (withUrl) {
 						const updateQuery = Prisma.sql`
-						UPDATE ${Prisma.raw(tableName)}
-						SET ${Prisma.raw(columnName)} = ${`${livePrefix}${key}`}
-						WHERE ${Prisma.raw(columnName)} = ${data[columnName]}
-					`;
+                        UPDATE ${Prisma.raw(tableName)}
+                        SET ${Prisma.raw(columnName)} = ${`${livePrefix}${key}`}
+                        WHERE ${Prisma.raw(columnName)} = ${data[columnName]}
+                        `;
 
 						await livePrisma.$executeRaw(updateQuery);
+
+						console.log("Database updated with new URL:", data[columnName]);
 					}
 				}
 			}

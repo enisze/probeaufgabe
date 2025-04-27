@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"scripts": {
-		"generate": "npx prisma generate --schema ./prisma/live-schema.prisma && npx prisma generate --schema ./prisma/staging-schema.prisma",
+		"postinstall": "npx prisma generate --schema ./prisma/live-schema.prisma && npx prisma generate --schema ./prisma/staging-schema.prisma",
 		"script": "tsx script.ts"
 	},
 	"dependencies": {
