@@ -1,5 +1,6 @@
 import {
 	DeleteObjectCommand,
+	GetObjectCommand,
 	HeadObjectCommand,
 	ListObjectsV2Command,
 	PutObjectCommand,
@@ -20,21 +21,48 @@ export async function uploadFromUrl(url: string): Promise<Buffer> {
 	return Buffer.from(arrayBuffer);
 }
 
+async function getFromS3(
+	client: S3Client,
+	bucket: string,
+	key: string,
+): Promise<Buffer> {
+	const command = new GetObjectCommand({
+		Bucket: bucket,
+		Key: key,
+	});
+
+	const response = await client.send(command);
+	if (!response.Body) {
+		throw new Error("Empty response body from S3");
+	}
+
+	return Buffer.from(await response.Body.transformToByteArray());
+}
+
 interface UploadToS3Params extends S3Params {
 	key: string;
-	s3Url: string;
+	source: {
+		sourceClient: S3Client;
+		sourceBucket: string;
+		sourceKey: string;
+	};
 }
 
 export async function uploadToS3({
 	s3Client,
 	bucketName,
 	key,
-	s3Url,
+	source,
 }: UploadToS3Params): Promise<void> {
 	try {
-		console.log(`Uploading to s3://${bucketName}/${key}`);
+		console.log("Uploading to s3");
 
-		const body = await uploadFromUrl(s3Url);
+		console.log(`Copying from s3://${source.sourceBucket}/${source.sourceKey}`);
+		const body = await getFromS3(
+			source.sourceClient,
+			source.sourceBucket,
+			source.sourceKey,
+		);
 
 		const command = new PutObjectCommand({
 			Bucket: bucketName,

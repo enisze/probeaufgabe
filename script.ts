@@ -1,22 +1,19 @@
-import { listS3Objects, uploadToS3 } from "@/s3/storage";
+import { checkS3ObjectExists, uploadToS3 } from "@/s3/storage";
 import { S3Client } from "@aws-sdk/client-s3";
-import { Prisma, PrismaClient } from "./generated/prisma";
-
-const stagingDbConnectionString = process.env.stagingDbConnectionString;
-const liveDbConnectionString = process.env.liveDbConnectionString;
+import { Prisma, PrismaClient } from "./generated/live/prisma";
 
 const livePrisma = new PrismaClient({
-	// datasources: {
-	// 	db: {
-	// 		url: liveDbConnectionString,
-	// 	},
-	// },
+	datasources: {
+		db: {
+			url: process.env.stagingDbConnectionString,
+		},
+	},
 });
 
 const stagingPrisma = new PrismaClient({
 	datasources: {
 		db: {
-			url: stagingDbConnectionString,
+			url: process.env.stagingDbConnectionString,
 		},
 	},
 });
@@ -53,9 +50,9 @@ const stagingS3Config: S3Config = {
 
 const tablesToTransfer = [
 	"audio_submission.path",
-	// "bilder_ki_images.image_path",
-	// "edubot_task_files.path",
-] as const;
+	"bilder_ki_images.image_path",
+	"edubot_task_files.path",
+];
 
 const liveClient = new S3Client({
 	endpoint: liveS3Config.endpoint,
@@ -75,48 +72,46 @@ interface ImageInfo {
 	withUrl: boolean;
 }
 
-async function isStagingImage(path: string): Promise<ImageInfo> {
-	const stagingUrl = stagingS3Config.endpoint.replace("https://", "");
-	const stagingPrefix = `https://${stagingS3Config.bucketName}.${stagingUrl}`;
+async function isStagingImage({
+	path,
+	s3Config,
+	s3Client,
+}: {
+	path: string;
+	s3Config: S3Config;
+	s3Client: S3Client;
+}): Promise<ImageInfo> {
+	const stagingUrl = s3Config.endpoint.replace("https://", "");
+	const stagingPrefix = `https://${s3Config.bucketName}.${stagingUrl}`;
+
+	let withUrl = false;
 
 	if (path.includes(stagingPrefix)) {
 		console.log("Staging URL detected");
-		const key = path.split(stagingPrefix)[1];
-		return {
-			isStaging: true,
-			key,
-			withUrl: true,
-		};
+		withUrl = true;
 	}
 
 	try {
-		// If we have credentials
-		// const exists = await checkS3ObjectExists({
-		// 	s3Client: stagingClient,
-		// 	bucketName: stagingS3Config.bucketName,
-		// 	key: path,
-		// });
+		const key = withUrl ? path.split(stagingPrefix)[1] : path;
 
-		// Check if the URL exists by making a HEAD request
-		const fullUrl = `${stagingPrefix}${path}`;
-		const response = await fetch(fullUrl, { method: "HEAD" });
+		const exists = await checkS3ObjectExists({
+			s3Client,
+			bucketName: s3Config.bucketName,
+			key,
+		});
 
 		return {
-			isStaging: response.ok,
-			key: path,
-			withUrl: false,
+			isStaging: exists,
+			key: withUrl ? path.split(stagingPrefix)[1] : path,
+			withUrl,
 		};
 	} catch (error) {
 		console.error("Error checking URL existence:", error);
 
-		const liveEndpoint = liveS3Config.endpoint.replace("https://", "");
-
-		const withUrl = path.includes("https://");
-		const key = withUrl ? path.split(liveEndpoint)[1] : path;
 		return {
 			isStaging: false,
-			key,
-			withUrl,
+			key: null,
+			withUrl: false,
 		};
 	}
 }
@@ -142,83 +137,45 @@ async function main() {
 
 			const liveData = await livePrisma.$queryRaw<RawQueryResult>(query);
 
-			const stagingData = await stagingPrisma.$queryRaw<RawQueryResult>(query);
-
-			//Do the liveData first
 			for (const data of liveData) {
 				if (!data[columnName]) continue;
-				const { isStaging, key, withUrl } = await isStagingImage(
-					data[columnName],
-				);
+				const { isStaging, key, withUrl } = await isStagingImage({
+					path: data[columnName],
+					s3Config: liveS3Config,
+					s3Client: liveClient,
+				});
 
 				if (isStaging && key) {
+					console.log("Staging data detected:", data[columnName]);
+
 					await uploadToS3({
 						s3Client: liveClient,
 						bucketName: liveS3Config.bucketName,
 						key,
-						s3Url: data[columnName],
+						source: {
+							sourceClient: stagingClient,
+							sourceBucket: stagingS3Config.bucketName,
+							sourceKey: key,
+						},
 					});
-					console.log(`Uploaded ${data[columnName]} to live s3`);
 
-					// await deleteFromS3({
-					//     s3Client: stagingClient,
-					//     bucketName: stagingS3Config.bucketName,
-					//     key,
-					// });
+					console.log("File uploaded to live S3:", data[columnName]);
 
-					//@ts-ignore let's ignore this for now
-					// const prefixUrl = liveS3Config.endpoint.replace("https://", "");
-					// const livePrefix= `https://${liveS3Config.bucketName}.${prefixUrl}`;
-					// await livePrisma[table.trim()].update({
-					//     where: { id: image.id },
-					//     data: {
-					//         image_path: withUrl ? `${livePrefix}${key}`: key,
-					//     },
-					// });
+					const prefixUrl = liveS3Config.endpoint.replace("https://", "");
+					const livePrefix = `https://${liveS3Config.bucketName}.${prefixUrl}`;
+
+					//Update database to use the updated URL if needed
+					if (withUrl) {
+						const updateQuery = Prisma.sql`
+						UPDATE ${Prisma.raw(tableName)}
+						SET ${Prisma.raw(columnName)} = ${`${livePrefix}${key}`}
+						WHERE ${Prisma.raw(columnName)} = ${data[columnName]}
+					`;
+
+						await livePrisma.$executeRaw(updateQuery);
+					}
 				}
 			}
-
-			const s3Objects = await listS3Objects({
-				bucketName: liveS3Config.bucketName,
-				s3Client: liveClient,
-			});
-			console.log(s3Objects);
-
-			//Do the stagingData
-			// for (const data of stagingData) {
-			// 	if (!data[columnName]) continue;
-			// 	const { isStaging, key, withUrl } = await isStagingImage(
-			// data[columnName],
-			// 	);
-
-			// 	if (!isStaging && key) {
-			// 		await uploadToS3({
-			// 			s3Client: stagingClient,
-			// 			bucketName: stagingS3Config.bucketName,
-			// 			key,
-			// 			s3Url: data[columnName],
-			// 		});
-			// 		console.log(
-			// 			`Uploaded ${data[columnName]} to s3://${stagingS3Config.bucketName}/${key}`,
-			// 		);
-
-			// await deleteFromS3({
-			//     s3Client: liveClient,
-			//     bucketName: liveS3Config.bucketName,
-			//     key,
-			// });
-
-			//@ts-ignore let's ignore this for now
-			// const prefixUrl = stagingS3Config.endpoint.replace("https://", "");
-			// const stagingPrefix= `https://${stagingS3Config.bucketName}.${prefixUrl}`;
-			// await stagingPrisma[table.trim()].update({
-			//     where: { id: image.id },
-			//     data: {
-			//         image_path: withUrl ? `${stagingPrefix}${key}`: key,
-			//     },
-			// });
-			// 	}
-			// }
 		}
 	} catch (error) {
 		console.error("Operation failed:", error);
